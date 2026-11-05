@@ -522,8 +522,13 @@ function viewSettings(){
     <p class="muted small">${S.persisted?'This browser has agreed not to clear your data automatically.':'This browser may clear the data automatically if the phone runs low on space.'} That does not protect you if you press "Clear browsing data" yourself.</p>
     <div class="row"><button class="btn primary" data-act="backup">Back up now</button><button class="btn" data-act="backup-dl">Save as a file</button></div>
     <p class="muted small"><b>Back up now</b> opens your phone's share menu. Choose <b>Drive</b> (save it in a folder) or <b>Gmail</b> (send it to yourself). Do this after every new book, or weekly.</p>
-    <div class="row"><label class="btn" style="cursor:pointer">Restore from a backup<input type="file" accept=".json,application/json,text/plain" data-upload="restore" class="ov"></label></div>
-    <p class="muted small">To restore on a new phone or after clearing data: open the studio, then <b>Restore from a backup</b>, and choose the saved file from Drive or your downloads.</p></div>`}
+    <div class="row"><label class="btn" style="cursor:pointer">Restore from a backup<input type="file" accept=".json,.txt,application/json,text/plain" data-upload="restore" class="ov"></label></div>
+    <p class="muted small">To restore on a new phone or after clearing data: open the studio, then <b>Restore from a backup</b>, and choose the saved file from Drive or your downloads.</p></div>
+  <div class="panel"><h3>Google Drive</h3>
+    <p class="muted small">${S.gUser?'Signed in as <b>'+esc(S.gUser)+'</b>. ':''}Saves a folder for each client to your Google Drive, with their photos, colouring pages and details. Needs a one-time setup. Paste your Google client ID below. It is safe to share, it is not a password.</p>
+    <label class="f">Google client ID<input type="text" id="gClientIn" value="${esc(aiGet('gclient'))}" placeholder="1234…apps.googleusercontent.com" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+    <div class="row"><button class="btn" data-act="g-save">Save ID</button><button class="btn primary" data-act="g-backup" ${aiGet('gclient')&&!S.gBusy?'':'disabled'}>Back up to Google Drive</button><button class="btn" data-act="g-restore" ${aiGet('gclient')&&!S.gBusy?'':'disabled'}>Restore from Drive</button></div>
+    <p class="small" id="gMsg" role="status">${esc(S.gStatus||(aiGet('gclient')?'Ready. Back up now will also use Google Drive.':'No client ID yet.'))}</p></div>`}
 
 /* ---------- render ---------- */
 function render(){
@@ -636,18 +641,93 @@ async function exportPdf(c){
 function backupAge(){const real=S.clients.some(c=>!c.example);if(!real)return null;if(!S.lastBackup)return {never:true};const d=Math.floor((Date.now()-new Date(S.lastBackup))/864e5);return {days:d}}
 function backupBanner(){const a=backupAge();if(!a)return '';if(!a.never&&a.days<3)return '';
   return `<div class="note"><b>${a.never?'Your work is not backed up yet.':'Your last backup was '+(a.days===1?'1 day':a.days+' days')+' ago.'}</b> It only lives in this browser, so clearing your browser data would erase it. <div style="margin-top:8px"><button class="btn small primary" data-act="backup">Back up now</button></div></div>`}
+
+/* ---------- Google Drive ---------- */
+let gTok=null,gExp=0,gsiP=null;
+function gMsg(t){S.gStatus=t;const e=$('#gMsg');if(e)e.textContent=t}
+function loadGsi(){if(window.google&&google.accounts&&google.accounts.oauth2)return Promise.resolve();if(gsiP)return gsiP;
+  gsiP=new Promise((res,rej)=>{const sc=document.createElement('script');sc.src='https://accounts.google.com/gsi/client';sc.async=true;sc.onload=res;sc.onerror=()=>{gsiP=null;rej({code:'network'})};document.head.appendChild(sc)});return gsiP}
+function gToken(){
+  if(gTok&&Date.now()<gExp-60000)return Promise.resolve(gTok);
+  const cid=aiGet('gclient');if(!cid)return Promise.reject({code:'noclient'});
+  return loadGsi().then(()=>new Promise((res,rej)=>{
+    const tc=google.accounts.oauth2.initTokenClient({client_id:cid,scope:'https://www.googleapis.com/auth/drive.file',hint:S.settings.email||'',
+      callback:r=>{if(r.error)return rej({code:'auth',msg:r.error});gTok=r.access_token;gExp=Date.now()+(+r.expires_in||3600)*1000;res(gTok)},
+      error_callback:e=>rej({code:'auth',msg:(e&&e.type)||'popup'})});
+    tc.requestAccessToken({})}))}
+async function gapi(url,opt){
+  const t=await gToken();opt=opt||{};opt.headers=Object.assign({Authorization:'Bearer '+t},opt.headers||{});
+  let r;try{r=await fetch(url,opt)}catch(e){throw {code:'network'}}
+  if(!r.ok){let m='';try{m=(await r.json()).error.message}catch(e){}if(r.status===401)gTok=null;throw {code:'http',status:r.status,msg:m}}return r}
+const DR='https://www.googleapis.com/drive/v3/files',UP='https://www.googleapis.com/upload/drive/v3/files',FOLDER='application/vnd.google-apps.folder';
+const qe=s=>String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");const pad2=n=>String(n).padStart(2,'0');
+async function gFolder(name,parent){
+  const q="name='"+qe(name)+"' and mimeType='"+FOLDER+"' and trashed=false"+(parent?" and '"+parent+"' in parents":'');
+  const j=await (await gapi(DR+'?fields=files(id)&q='+encodeURIComponent(q))).json();if(j.files&&j.files[0])return j.files[0].id;
+  const r=await gapi(DR+'?fields=id',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,mimeType:FOLDER,parents:parent?[parent]:undefined})});return (await r.json()).id}
+async function gPut(name,blob,type,parent,id){
+  const meta=id?{name}:{name,parents:[parent]};const b='bc'+Math.random().toString(36).slice(2);
+  const body=new Blob(['--'+b+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n',JSON.stringify(meta),'\r\n--'+b+'\r\nContent-Type: '+type+'\r\n\r\n',blob,'\r\n--'+b+'--']);
+  try{const r=await gapi((id?UP+'/'+id:UP)+'?uploadType=multipart&fields=id',{method:id?'PATCH':'POST',headers:{'Content-Type':'multipart/related; boundary='+b},body});return (await r.json()).id}
+  catch(e){if(id&&e.status===404)return gPut(name,blob,type,parent,null);throw e}}
+async function gRename(id,name){
+  try{await gapi(DR+'/'+id+'?fields=id',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});return true}catch(e){if(e.status===404)return false;throw e}}
+function detailsText(c){return ['Client: '+c.name,'Phone: '+(c.phone||'-'),'Email: '+(c.email||'-'),'Book title: '+(c.title||'-'),'Status: '+STATUS[c.status],'Price: '+ksh(c.price),'Deposit: '+ksh(dep(c))+'  (M-Pesa code '+(c.depositCode||'-')+')','Final payment M-Pesa code: '+(c.finalCode||'-'),'Notes: '+(c.notes||'-'),'Photos: '+c.photos.length+'    Colouring pages: '+c.pages.length,'Saved: '+new Date().toLocaleString()].join('\r\n')}
+function gErr(e){
+  if(e.code==='noclient')return 'Add your Google client ID first.';
+  if(e.code==='network')return 'Could not reach Google. Check your connection and try again.';
+  if(e.code==='auth')return /popup_closed|cancel|dismiss/i.test(e.msg||'')?'Sign-in was cancelled. Press the button again.':/access_denied/.test(e.msg||'')?'Google refused the sign-in. Make sure this Google account is added as a test user.':/popup_failed|blocked/i.test(e.msg||'')?'Your browser blocked the Google sign-in window. Allow pop-ups for this site, then try again.':'Google sign-in failed ('+(e.msg||'unknown')+').';
+  if(e.status===403)return 'Google Drive refused this. Is the Google Drive API turned on in your Google Cloud project? '+(e.msg||'');
+  if(e.status===401)return 'Google sign-in expired. Press the button again.';
+  return 'Google Drive error'+(e.status?' '+e.status:'')+': '+(e.msg||e.code)}
+async function driveBackup(real){
+  if(S.gBusy)return;S.gBusy=true;gMsg('Signing in to Google…');
+  try{
+    await gToken();
+    const who=await (await gapi('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)')).json();S.gUser=who.user&&who.user.emailAddress;
+    const root=await gFolder('Babs Crafts Backups');let n=0;
+    for(const c of real){
+      gMsg('Saving '+c.name+' ('+(++n)+' of '+real.length+')…');
+      c.drive=c.drive||{};const fl=c.drive.files=c.drive.files||{},nm=c.drive.names=c.drive.names||{};
+      const fid=await gFolder(safeName(c.name)+' ('+String(c.id).slice(-4)+')',root);
+      const ph=await gFolder('Photos',fid),pg=await gFolder('Pages',fid);
+      const sync=async(list,prefix,parent)=>{for(let i=0;i<list.length;i++){const it=list[i],name=prefix+'-'+pad2(i+1)+'.jpg';
+        if(fl[it.id]){if(nm[it.id]===name)continue;if(await gRename(fl[it.id],name)){nm[it.id]=name;continue}}
+        fl[it.id]=await gPut(name,dataToBlob(it.src),'image/jpeg',parent);nm[it.id]=name;gMsg('Saving '+c.name+': '+prefix+' '+(i+1)+' of '+list.length+'…')}};
+      await sync(c.photos,'photo',ph);await sync(c.pages,'page',pg);
+      fl.details=await gPut('Client details.txt',new Blob([detailsText(c)],{type:'text/plain'}),'text/plain',fid,fl.details);
+      await Store.put('clients',c)}
+    gMsg('Saving the full backup file…');
+    const full=JSON.stringify({app:'babs-crafts-studio',version:1,savedAt:new Date().toISOString(),settings:S.settings,clients:real});
+    const id=await gPut('babs-crafts-backup.json',new Blob([full],{type:'application/json'}),'application/json',root,aiGet('gfull')||null);aiSet('gfull',id);
+    S.lastBackup=new Date().toISOString();Store.put('meta',{key:'lastBackup',value:S.lastBackup});
+    gMsg('Saved to Google Drive ('+(S.gUser||'your account')+') in the folder "Babs Crafts Backups".');toast('Saved to Google Drive.')}
+  catch(e){const m=gErr(e);gMsg(m);toast(m)}
+  S.gBusy=false;if(S.view==='settings'||S.view==='home')render()}
+async function driveRestore(){
+  if(S.gBusy)return;S.gBusy=true;gMsg('Signing in to Google…');
+  try{await gToken();
+    const q="name='babs-crafts-backup.json' and trashed=false";
+    const j=await (await gapi(DR+'?orderBy='+encodeURIComponent('modifiedTime desc')+'&pageSize=1&fields=files(id)&q='+encodeURIComponent(q))).json();
+    if(!j.files||!j.files[0]){gMsg('No backup found in this Google account. Sign in with the account you backed up to.');S.gBusy=false;return}
+    gMsg('Restoring…');const t=await (await gapi(DR+'/'+j.files[0].id+'?alt=media')).text();aiSet('gfull',j.files[0].id);
+    await restoreText(t);gMsg('Restored from Google Drive.')}
+  catch(e){const m=gErr(e);gMsg(m);toast(m)}
+  S.gBusy=false}
 async function backup(mode){
   const real=S.clients.filter(c=>!c.example);if(!real.length){toast('There are no client folders to back up yet.');return}
   const text=JSON.stringify({app:'babs-crafts-studio',version:1,savedAt:new Date().toISOString(),settings:S.settings,clients:real});
+  if(mode!=='download'&&aiGet('gclient'))return driveBackup(real);
   const name='babs-crafts-backup-'+dayStr(new Date().toISOString())+'.json';let done=false;
-  if(mode!=='download'){try{const f=new File([text],name,{type:'application/json'});
+  if(mode!=='download'){try{const f=new File([text],name.replace(/\.json$/,'.txt'),{type:'text/plain'});
     if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:'Babs Crafts backup'});done=true}}
     catch(e){if(e&&e.name==='AbortError')return}}
   if(!done){if(!downloads){toast('This view cannot save files. Open the studio from your website link.');return}
     try{await downloads.save({filename:name,data:text});done=true}catch(e){if(!e||e.code!=='declined')toast('Could not save the backup.');return}}
   S.lastBackup=new Date().toISOString();Store.put('meta',{key:'lastBackup',value:S.lastBackup});render();toast(mode==='download'?'Backup file saved. Keep it somewhere safe, like Google Drive.':'Backup sent. Make sure you chose Google Drive or your email.')}
-async function restore(file){
-  try{const j=JSON.parse(await file.text());if(!j||j.app!=='babs-crafts-studio'||!Array.isArray(j.clients))throw 0;
+async function restore(file){try{await restoreText(await file.text())}catch(e){toast('That file is not a Babs Crafts backup.')}}
+async function restoreText(text){
+  try{const j=JSON.parse(text);if(!j||j.app!=='babs-crafts-studio'||!Array.isArray(j.clients))throw 0;
     for(const c of j.clients){const i=S.clients.findIndex(x=>x.id===c.id);if(i>=0)S.clients[i]=c;else S.clients.push(c);await Store.put('clients',c)}
     if(j.settings){S.settings=Object.assign({},DEF,j.settings);saveSettings()}render();toast(j.clients.length+' folder'+(j.clients.length===1?'':'s')+' restored.')}
   catch(e){toast('That file is not a Babs Crafts backup.')}}
@@ -682,6 +762,9 @@ document.addEventListener('click',e=>{
   else if(a==='del-client'&&c)confirmTwice(t,'del'+c.id,'Press again to delete',()=>{Store.del('clients',c.id);S.clients=S.clients.filter(x=>x.id!==c.id);S.openId=null;if(S.studioId===c.id)S.studioId=null;render();toast('Folder deleted.')});
   else if(a==='backup')backup();
   else if(a==='backup-dl')backup('download');
+  else if(a==='g-save'){const v=($('#gClientIn').value||'').trim();if(v&&!/\.apps\.googleusercontent\.com$/.test(v)){gMsg('That does not look like a client ID. It ends with .apps.googleusercontent.com');return}aiSet('gclient',v);gTok=null;gMsg(v?'Client ID saved.':'Client ID removed.');render();if(v)loadGsi().catch(()=>{})}
+  else if(a==='g-backup'){const real=S.clients.filter(x=>!x.example);if(!real.length){toast('There are no client folders to back up yet.');return}driveBackup(real)}
+  else if(a==='g-restore')driveRestore();
   else if(a==='dl-page'&&c)dlPage(c,t.dataset.id);
   else if(a==='dl-zip'&&c)dlZip(c);
   else if(a==='rm-logo'){S.settings.logo=null;saveSettings();render()}});
@@ -739,6 +822,7 @@ async function start(){
   if(!S.clients.length&&!S._cleared){S.clients=seedExamples();S.examples=true;S.clients.forEach(c=>saveClient(c))}
   else S.examples=S.clients.some(c=>c.example);
   if(!Store.ok)toast('Saving is turned off in this window. Your work will not be kept after you close it.');
+  if(aiGet('gclient'))loadGsi().catch(()=>{});
   render()}
 start();
 })();
