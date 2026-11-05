@@ -230,8 +230,8 @@ function saveSettings(){Store.put('meta',{key:'settings',value:S.settings})}
 function getClient(id){return S.clients.find(c=>c.id===id)||null}
 function newClient(o){return Object.assign({id:uid(),name:'New client',phone:'',email:'',notes:'',title:'',subtitle:'',price:S.settings.price,status:'pending',createdAt:new Date().toISOString(),paidAt:null,
   depositAmount:Math.round((+S.settings.price||0)*(+S.settings.depositPct||50)/100),depositPaidAt:null,depositCode:'',finalCode:'',
-  photos:[],pages:[],coverColor:COVERS[0],coverPageId:null,fit:'contain',margin:10,trim:true,border:false,gift:true,back:true,example:false,titleFont:'Bricolage Grotesque',titlePos:'top',titleScale:1,titleColor:'auto',thanks:''},o||{})}
-function migrate(c){return Object.assign({email:'',depositAmount:Math.round((+c.price||2500)*.5),depositPaidAt:null,depositCode:'',finalCode:'',border:false,titleFont:'Bricolage Grotesque',titlePos:'top',titleScale:1,titleColor:'auto',thanks:''},c)}
+  photos:[],pages:[],coverColor:COVERS[0],coverPageId:null,fit:'contain',margin:10,trim:true,border:false,gift:true,back:true,example:false,titleFont:'Bricolage Grotesque',titlePos:'top',titleScale:1,titleColor:'auto',thanks:'',coverBorder:false,subScale:1},o||{})}
+function migrate(c){return Object.assign({email:'',depositAmount:Math.round((+c.price||2500)*.5),depositPaidAt:null,depositCode:'',finalCode:'',border:false,titleFont:'Bricolage Grotesque',titlePos:'top',titleScale:1,titleColor:'auto',thanks:'',coverBorder:false,subScale:1},c)}
 
 /* ---------- images ---------- */
 const imgCache=new Map();
@@ -349,24 +349,25 @@ async function footerBlock(x,W,H,u,fg,st,c){
 async function drawCover(cv,c){
   const F=FONTS.find(f=>f[0]===c.titleFont)||FONTS[0];await fontsReady();await loadFont(F);
   const x=cv.getContext('2d'),W=cv.width,H=cv.height,u=W/210;const col=c.coverColor||COVERS[0];const auto=isDark(col)?'#fff':'#1E1B3A';const fg=c.titleColor&&c.titleColor!=='auto'?c.titleColor:auto;
-  x.fillStyle=col;x.fillRect(0,0,W,H);x.strokeStyle=auto;x.globalAlpha=.55;x.lineWidth=.7*u;rr(x,9*u,9*u,W-18*u,H-18*u,5*u);x.stroke();x.globalAlpha=1;
+  x.fillStyle=col;x.fillRect(0,0,W,H);if(c.coverBorder){x.strokeStyle=auto;x.globalAlpha=.55;x.lineWidth=.7*u;rr(x,9*u,9*u,W-18*u,H-18*u,5*u);x.stroke();x.globalAlpha=1}
   const title=(c.title||'Your title here').trim();x.fillStyle=fg;x.textAlign='center';x.textBaseline='alphabetic';
   const scale=+c.titleScale||1;let size=(title.length>26?15:title.length>14?19:24)*scale;let lines;const fam='"'+F[0]+'","DM Sans",sans-serif';
   for(;;){x.font=F[2]+' '+(size*u)+'px '+fam;lines=wrap(x,title,W-44*u);if(lines.length<=3||size<8)break;size-=1.5}
-  const lhh=size*u*1.08;x.font='500 '+(5.2*u)+'px "DM Sans",sans-serif';const sl=c.subtitle?wrap(x,c.subtitle,W-60*u).slice(0,2):[];
-  const blockH=size*u*.85+(lines.length-1)*lhh+size*u*.2+(sl.length?9*u+(sl.length-1)*6.6*u+2*u:0);
+  const lhh=size*u*1.08;const ssz=Math.max(8.5,Math.min(13,size*.5))*(+c.subScale||1);x.font=F[2]+' '+(ssz*u)+'px '+fam;const sl=c.subtitle?wrap(x,c.subtitle,W-40*u).slice(0,2):[];const slh=ssz*u*1.15;
+  const blockH=size*u*.85+(lines.length-1)*lhh+size*u*.2+(sl.length?ssz*u*1.5+(sl.length-1)*slh+2*u:0);
   const bottom=c.titlePos==='bottom';const blockTop=bottom?H-26*u-blockH:30*u;
   x.font=F[2]+' '+(size*u)+'px '+fam;lines.forEach((l,i)=>x.fillText(l,W/2,blockTop+size*u*.85+i*lhh));
-  if(sl.length){const y0=blockTop+size*u*.85+(lines.length-1)*lhh+9*u;x.font='500 '+(5.2*u)+'px "DM Sans",sans-serif';x.globalAlpha=.9;sl.forEach((l,i)=>x.fillText(l,W/2,y0+i*6.6*u));x.globalAlpha=1}
-  const picTop=bottom?22*u:Math.max(blockTop+blockH+12*u,90*u),picBot=bottom?blockTop-12*u:H-22*u;
+  if(sl.length){const y0=blockTop+size*u*.85+(lines.length-1)*lhh+ssz*u*1.5;x.font=F[2]+' '+(ssz*u)+'px '+fam;x.globalAlpha=.92;sl.forEach((l,i)=>x.fillText(l,W/2,y0+i*slh));x.globalAlpha=1}
+  const picTop=bottom?16*u:Math.max(blockTop+blockH+8*u,80*u),picBot=bottom?blockTop-10*u:H-16*u;
   const pg=c.pages.find(p=>p.id===c.coverPageId);
-  if(pg){const top=picTop,bh=picBot-picTop,bw=Math.min(W-60*u,bh*.74);const px=(W-bw)/2;
-    x.save();x.shadowColor='rgba(0,0,0,.18)';x.shadowBlur=8*u;x.shadowOffsetY=2*u;x.fillStyle='#fff';rr(x,px,top,bw,bh,4*u);x.fill();x.restore();
-    const ph=await renderPage(pg,Math.round(bw),c.fit,6,c.trim,false);x.save();rr(x,px,top,bw,bh,4*u);x.clip();x.drawImage(ph,px,top+(bh-ph.height*(bw/ph.width))/2,bw,ph.height*(bw/ph.width));x.restore()}
+  if(pg){const top=picTop,bh=picBot-picTop,bw=Math.min(W-26*u,bh*.74);const px=(W-bw)/2;
+    const ph=await renderPage(pg,Math.round(bw),c.fit,2,c.trim,false);const dh=ph.height*(bw/ph.width),dy=top+(bh-dh)/2;
+    if(isDark(col)){x.fillStyle='#fff';rr(x,px,dy,bw,dh,3*u);x.fill();x.save();rr(x,px,dy,bw,dh,3*u);x.clip();x.drawImage(ph,px,dy,bw,dh);x.restore()}
+    else{const t=document.createElement('canvas');t.width=ph.width;t.height=ph.height;const tx=t.getContext('2d');tx.drawImage(ph,0,0);const id=tx.getImageData(0,0,t.width,t.height),d=id.data;for(let i=0;i<d.length;i+=4){for(let k=0;k<3;k++){const v=d[i+k]*255/222;d[i+k]=v>255?255:v}}tx.putImageData(id,0,0);x.save();x.globalCompositeOperation='multiply';x.drawImage(t,px,dy,bw,dh);x.restore()}}
   else{x.globalAlpha=.9;const sx=W/2-27*u,cy=(picTop+picBot)/2;[['#FF5C8A',0],['#FFC93C',1],['#1FB58F',2]].forEach(([k,i])=>{x.fillStyle=k;x.beginPath();x.arc(sx+i*27*u,cy,7*u,0,7);x.fill()});x.globalAlpha=1}}
 async function drawInside(cv,st,c){await fontsReady();const x=cv.getContext('2d'),W=cv.width,H=cv.height,u=W/210;x.fillStyle='#fff';x.fillRect(0,0,W,H);await footerBlock(x,W,H,u,'#1E1B3A',st,c)}
 async function drawBack(cv,c,st){await fontsReady();const x=cv.getContext('2d'),W=cv.width,H=cv.height,u=W/210;const col=c.coverColor||COVERS[0];const fg=isDark(col)?'#fff':'#1E1B3A';
-  x.fillStyle=col;x.fillRect(0,0,W,H);x.strokeStyle=fg;x.globalAlpha=.55;x.lineWidth=.7*u;rr(x,9*u,9*u,W-18*u,H-18*u,5*u);x.stroke();x.globalAlpha=1;await footerBlock(x,W,H,u,fg,st,c)}
+  x.fillStyle=col;x.fillRect(0,0,W,H);if(c.coverBorder){x.strokeStyle=fg;x.globalAlpha=.55;x.lineWidth=.7*u;rr(x,9*u,9*u,W-18*u,H-18*u,5*u);x.stroke();x.globalAlpha=1}await footerBlock(x,W,H,u,fg,st,c)}
 
 /* ---------- example data ---------- */
 function seedExamples(){
@@ -517,6 +518,8 @@ function studioBook(c){
     <label class="f">Subtitle (optional)<input type="text" id="bkSub" value="${esc(c.subtitle)}" placeholder="A book for Jennifer"></label>
     <label class="f">Cover picture<select id="bkPic"><option value="">No picture</option>${c.pages.map((p,i)=>`<option value="${p.id}" ${c.coverPageId===p.id?'selected':''}>Page ${i+1}</option>`).join('')}</select></label></div>
     <div><div class="small" style="font-weight:700;margin-bottom:8px">Title position</div><div class="seg" role="group" aria-label="Title position"><button data-tpos="top" aria-pressed="${c.titlePos!=='bottom'}">At the top</button><button data-tpos="bottom" aria-pressed="${c.titlePos==='bottom'}">At the bottom</button></div></div>
+    <label class="f">Subtitle size <span class="muted" id="ssVal">${Math.round((+c.subScale||1)*100)}%</span><input type="range" id="subScale" min="70" max="160" value="${Math.round((+c.subScale||1)*100)}"></label>
+    <label class="check"><input type="checkbox" id="coverBorder" ${c.coverBorder?'checked':''}> Thin border line around the cover</label>
     <label class="f">Title size <span class="muted" id="tsVal">${Math.round((+c.titleScale||1)*100)}%</span><input type="range" id="titleScale" min="60" max="140" value="${Math.round((+c.titleScale||1)*100)}"></label>
     <div><div class="small" style="font-weight:700;margin-bottom:8px">Title font</div><div class="fontchips">${FONTS.map(f=>`<button data-font="${f[0]}" aria-pressed="${(c.titleFont||'Bricolage Grotesque')===f[0]}" style="font-family:'${f[0]}',sans-serif;font-weight:${f[2]}">${sample}<small>${f[1]}</small></button>`).join('')}</div></div>
     <div><div class="small" style="font-weight:700;margin-bottom:8px">Title colour</div><div class="swatches">${TCOLS.map(k=>`<button class="sw" data-tcol="${k}" style="background:${k==='auto'?'conic-gradient(#1E1B3A 0 50%,#fff 0 100%)':k}" aria-label="Title colour ${k}" aria-pressed="${(c.titleColor||'auto')===k}"></button>`).join('')}</div><p class="muted small">The first one switches between dark and white to suit the cover colour.</p></div>
@@ -877,6 +880,7 @@ document.addEventListener('input',e=>{
   if(t.dataset.f&&!['status','paidAt','depositPaidAt'].includes(t.dataset.f)){const k=t.dataset.f;c[k]=t.type==='number'?(parseFloat(t.value)||0):t.value;saveClient(c);if(k==='name'){const h=$('.head h1');if(h)h.textContent=t.value||'Client'}if(k==='price'||k==='depositAmount'){const pl=$('#payLine');if(pl)pl.innerHTML='<b>'+payLine(c)+'</b>'}return}
   if(t.id==='bkTitle'){c.title=t.value;saveClient(c);drawBookPreviews(c);return}
   if(t.id==='bkThanks'){c.thanks=t.value;saveClient(c);drawBookPreviews(c);return}
+  if(t.id==='subScale'){c.subScale=+t.value/100;$('#ssVal').textContent=t.value+'%';saveClient(c);drawBookPreviews(c);return}
   if(t.id==='titleScale'){c.titleScale=+t.value/100;$('#tsVal').textContent=t.value+'%';saveClient(c);drawBookPreviews(c);return}
   if(t.id==='bkSub'){c.subtitle=t.value;saveClient(c);drawBookPreviews(c);return}
   if(t.id==='detail'){S.detail=+t.value;$('#detailVal').textContent=t.value;return}
@@ -901,6 +905,7 @@ document.addEventListener('change',e=>{
   if(t.dataset.f){saveClient(c);return}
   if(t.id==='trim'){c.trim=t.checked;saveClient(c);hydrate();return}
   if(t.id==='bdr'){c.border=t.checked;saveClient(c);hydrate();return}
+  if(t.id==='coverBorder'){c.coverBorder=t.checked;saveClient(c);drawBookPreviews(c);return}
   if(t.id==='bkPic'){c.coverPageId=t.value||null;saveClient(c);drawBookPreviews(c);return}
   if(t.id==='bkGift'){c.gift=t.checked;saveClient(c);return}
   if(t.id==='bkBack'){c.back=t.checked;saveClient(c);return}});
