@@ -516,14 +516,19 @@ function viewSettings(){
     <div class="fields"><label class="f">Image model<select id="aiModel">${[['gpt-image-2','gpt-image-2 (recommended)'],['gpt-image-1.5','gpt-image-1.5'],['gpt-image-1-mini','gpt-image-1-mini (cheapest)']].map(([k,l])=>`<option value="${k}" ${aiGet('model','gpt-image-2')===k?'selected':''}>${l}</option>`).join('')}</select></label>
     <label class="f">Quality<select id="aiQuality">${[['low','Low (cheapest)'],['medium','Medium (good for line art)'],['high','High (costs more)']].map(([k,l])=>`<option value="${k}" ${aiGet('quality','medium')===k?'selected':''}>${l}</option>`).join('')}</select></label></div>
     <p class="muted small">Each redraw costs OpenAI credit, a few shillings a page. Needs credit on the OpenAI API account (separate from ChatGPT). If OpenAI retires a model, pick another here.</p></div>
-  <div class="panel"><h3>Backup</h3><p class="muted small">${Store.ok?'Everything is saved in this browser on this device.':'Saving is off in this window, so work is lost when you close it.'} Download a backup file now and then. Google Drive backup is the next step.</p>
-    <div class="row"><button class="btn" data-act="backup" ${downloads?'':'disabled'}>Download backup</button><label class="btn" style="cursor:pointer">Restore from backup<input type="file" accept=".json,application/json" data-upload="restore" class="ov"></label></div>
-    ${downloads?'':'<p class="muted small"></p>'}</div>`}
+  <div class="panel"><h3>Backup and storage</h3>
+    <p class="small"><b>${(()=>{const a=backupAge();return !a?'No client folders to back up yet.':a.never?'Not backed up yet.':'Last backup: '+niceDate(S.lastBackup)})()}</b></p>
+    <p class="muted small">${Store.ok?'Your folders and photos are saved inside this browser on this phone.':'Saving is off in this window, so work is lost when you close it.'} If you clear your browser data, or lose the phone, they are gone. A backup copy kept in Google Drive protects you.</p>
+    <p class="muted small">${S.persisted?'This browser has agreed not to clear your data automatically.':'This browser may clear the data automatically if the phone runs low on space.'} That does not protect you if you press "Clear browsing data" yourself.</p>
+    <div class="row"><button class="btn primary" data-act="backup">Back up now</button><button class="btn" data-act="backup-dl">Save as a file</button></div>
+    <p class="muted small"><b>Back up now</b> opens your phone's share menu. Choose <b>Drive</b> (save it in a folder) or <b>Gmail</b> (send it to yourself). Do this after every new book, or weekly.</p>
+    <div class="row"><label class="btn" style="cursor:pointer">Restore from a backup<input type="file" accept=".json,application/json,text/plain" data-upload="restore" class="ov"></label></div>
+    <p class="muted small">To restore on a new phone or after clearing data: open the studio, then <b>Restore from a backup</b>, and choose the saved file from Drive or your downloads.</p></div>`}
 
 /* ---------- render ---------- */
 function render(){
   renderNav();$('#brandName').textContent=S.settings.brand||'Babs Crafts';{const bm=$('#brandMono'),ls=logoOf(S.settings);if(bm.dataset.src!==String(ls.length)){bm.innerHTML='<img alt="" src="'+ls+'">';bm.dataset.src=String(ls.length)}}
-  const v=S.view;$('#main').innerHTML=v==='home'?viewHome():v==='clients'?viewClients():v==='studio'?viewStudio():viewSettings();
+  const v=S.view;$('#main').innerHTML=v==='home'?backupBanner()+viewHome():v==='clients'?viewClients():v==='studio'?viewStudio():viewSettings();
   hydrate()}
 async function hydrate(){
   const c=getClient(S.studioId);
@@ -628,9 +633,19 @@ async function exportPdf(c){
   }catch(e){if(note)note.textContent='Something went wrong while building the PDF. Try again, or remove very large pages.'}
   if(btn)btn.disabled=false;setTimeout(()=>{if(prog)prog.hidden=true},800)}
 
-async function backup(){
-  if(!downloads)return;const data=JSON.stringify({app:'babs-crafts-studio',version:1,savedAt:new Date().toISOString(),settings:S.settings,clients:S.clients.filter(c=>!c.example)});
-  try{await downloads.save({filename:'babs-crafts-backup-'+dayStr(new Date().toISOString())+'.json',data});toast('Backup saved.')}catch(e){if(!e||e.code!=='declined')toast('Could not save the backup.')}}
+function backupAge(){const real=S.clients.some(c=>!c.example);if(!real)return null;if(!S.lastBackup)return {never:true};const d=Math.floor((Date.now()-new Date(S.lastBackup))/864e5);return {days:d}}
+function backupBanner(){const a=backupAge();if(!a)return '';if(!a.never&&a.days<3)return '';
+  return `<div class="note"><b>${a.never?'Your work is not backed up yet.':'Your last backup was '+(a.days===1?'1 day':a.days+' days')+' ago.'}</b> It only lives in this browser, so clearing your browser data would erase it. <div style="margin-top:8px"><button class="btn small primary" data-act="backup">Back up now</button></div></div>`}
+async function backup(mode){
+  const real=S.clients.filter(c=>!c.example);if(!real.length){toast('There are no client folders to back up yet.');return}
+  const text=JSON.stringify({app:'babs-crafts-studio',version:1,savedAt:new Date().toISOString(),settings:S.settings,clients:real});
+  const name='babs-crafts-backup-'+dayStr(new Date().toISOString())+'.json';let done=false;
+  if(mode!=='download'){try{const f=new File([text],name,{type:'application/json'});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:'Babs Crafts backup'});done=true}}
+    catch(e){if(e&&e.name==='AbortError')return}}
+  if(!done){if(!downloads){toast('This view cannot save files. Open the studio from your website link.');return}
+    try{await downloads.save({filename:name,data:text});done=true}catch(e){if(!e||e.code!=='declined')toast('Could not save the backup.');return}}
+  S.lastBackup=new Date().toISOString();Store.put('meta',{key:'lastBackup',value:S.lastBackup});render();toast(mode==='download'?'Backup file saved. Keep it somewhere safe, like Google Drive.':'Backup sent. Make sure you chose Google Drive or your email.')}
 async function restore(file){
   try{const j=JSON.parse(await file.text());if(!j||j.app!=='babs-crafts-studio'||!Array.isArray(j.clients))throw 0;
     for(const c of j.clients){const i=S.clients.findIndex(x=>x.id===c.id);if(i>=0)S.clients[i]=c;else S.clients.push(c);await Store.put('clients',c)}
@@ -666,6 +681,7 @@ document.addEventListener('click',e=>{
   else if(a==='export'&&c)exportPdf(c);
   else if(a==='del-client'&&c)confirmTwice(t,'del'+c.id,'Press again to delete',()=>{Store.del('clients',c.id);S.clients=S.clients.filter(x=>x.id!==c.id);S.openId=null;if(S.studioId===c.id)S.studioId=null;render();toast('Folder deleted.')});
   else if(a==='backup')backup();
+  else if(a==='backup-dl')backup('download');
   else if(a==='dl-page'&&c)dlPage(c,t.dataset.id);
   else if(a==='dl-zip'&&c)dlZip(c);
   else if(a==='rm-logo'){S.settings.logo=null;saveSettings();render()}});
@@ -718,7 +734,8 @@ async function start(){
   if(!downloads)downloads={save:async({filename,data})=>{const b=data instanceof Blob?data:new Blob([data]);const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000);return {status:'saved'}}};
   S.inClaude=!!(window.claude&&window.claude.use);if(S.inClaude)render();
   await Store.open();
-  if(Store.ok){const cl=await Store.all('clients');if(Array.isArray(cl))S.clients=cl.map(migrate);const metas=await Store.all('meta');if(Array.isArray(metas)){metas.forEach(m=>{if(m&&typeof m.key==='string'&&m.key.indexOf('ai.')===0&&m.value){mem[m.key.slice(3)]=m.value;try{if(!localStorage.getItem('babs.ai.'+m.key.slice(3)))localStorage.setItem('babs.ai.'+m.key.slice(3),m.value)}catch(e){}}});const m=metas.find(x=>x.key==='settings');if(m)S.settings=Object.assign({},DEF,m.value);S._cleared=!!metas.find(x=>x.key==='examplesCleared')}}
+  try{if(navigator.storage&&navigator.storage.persist)S.persisted=await navigator.storage.persist()}catch(e){}
+  if(Store.ok){const cl=await Store.all('clients');if(Array.isArray(cl))S.clients=cl.map(migrate);const metas=await Store.all('meta');if(Array.isArray(metas)){metas.forEach(m=>{if(m&&typeof m.key==='string'&&m.key.indexOf('ai.')===0&&m.value){mem[m.key.slice(3)]=m.value;try{if(!localStorage.getItem('babs.ai.'+m.key.slice(3)))localStorage.setItem('babs.ai.'+m.key.slice(3),m.value)}catch(e){}}});const m=metas.find(x=>x.key==='settings');if(m)S.settings=Object.assign({},DEF,m.value);S._cleared=!!metas.find(x=>x.key==='examplesCleared');{const lb=metas.find(x=>x.key==='lastBackup');if(lb)S.lastBackup=lb.value}}}
   if(!S.clients.length&&!S._cleared){S.clients=seedExamples();S.examples=true;S.clients.forEach(c=>saveClient(c))}
   else S.examples=S.clients.some(c=>c.example);
   if(!Store.ok)toast('Saving is turned off in this window. Your work will not be kept after you close it.');
