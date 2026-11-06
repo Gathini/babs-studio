@@ -225,8 +225,8 @@ const DEF={brand:'Babs Crafts',email:'',phone:'',logo:null,depositPct:50,price:2
 const S={clients:[],settings:Object.assign({},DEF),view:'home',openId:null,studioId:null,tab:'pages',filter:'all',q:'',detail:6,examples:false,busy:false};
 let downloads=null;
 const saveTimers={};
-function saveClient(c){clearTimeout(saveTimers[c.id]);saveTimers[c.id]=setTimeout(()=>{Store.put('clients',c)},350)}
-function saveSettings(){Store.put('meta',{key:'settings',value:S.settings})}
+function saveClient(c){c.updatedAt=new Date().toISOString();clearTimeout(saveTimers[c.id]);saveTimers[c.id]=setTimeout(()=>{Store.put('clients',c);Cloud.queue(c)},350)}
+function saveSettings(){S.settings.updatedAt=new Date().toISOString();Store.put('meta',{key:'settings',value:S.settings});Cloud.queueSettings()}
 function getClient(id){return S.clients.find(c=>c.id===id)||null}
 function newClient(o){return Object.assign({id:uid(),name:'New client',phone:'',email:'',notes:'',title:'',subtitle:'',price:S.settings.price,status:'pending',createdAt:new Date().toISOString(),paidAt:null,
   depositAmount:Math.round((+S.settings.price||0)*(+S.settings.depositPct||50)/100),depositPaidAt:null,depositCode:'',finalCode:'',
@@ -582,6 +582,29 @@ function viewSettings(){
     <div class="fields"><label class="f">Image model<select id="aiModel">${[['gpt-image-2','gpt-image-2 (recommended)'],['gpt-image-1.5','gpt-image-1.5'],['gpt-image-1-mini','gpt-image-1-mini (cheapest)']].map(([k,l])=>`<option value="${k}" ${aiGet('model','gpt-image-2')===k?'selected':''}>${l}</option>`).join('')}</select></label>
     <label class="f">Quality<select id="aiQuality">${[['low','Low (cheapest)'],['medium','Medium (good for line art)'],['high','High (costs more)']].map(([k,l])=>`<option value="${k}" ${aiGet('quality','medium')===k?'selected':''}>${l}</option>`).join('')}</select></label></div>
     <p class="muted small">Each redraw costs OpenAI credit, a few shillings a page. Needs credit on the OpenAI API account (separate from ChatGPT). If OpenAI retires a model, pick another here.</p></div>
+  <div class="panel"><h3>Cloud sync (your work follows you)</h3>
+    <p class="muted small">Saves everything automatically to your own Firebase cloud, a few seconds after each change. Open the same website on your phone or laptop, sign in with Google, and your folders are there. ${Cloud.user?'<b>Signed in as '+esc(Cloud.user.email)+'.</b>':'Needs a one-time setup. The steps are below.'}</p>
+    <label class="f">Firebase web app config<textarea id="fbCfgIn" rows="6" placeholder="Paste the whole firebaseConfig block here" autocapitalize="off" spellcheck="false">${esc(aiGet('fbcfg'))}</textarea></label>
+    <div class="row"><button class="btn" data-act="fb-save">Save config</button><button class="btn primary" data-act="fb-signin" ${Cloud.has()&&!Cloud.user?'':'disabled'}>Sign in with Google</button><button class="btn" data-act="fb-sync" ${Cloud.user?'':'disabled'}>Sync now</button><button class="btn" data-act="fb-signout" ${Cloud.user?'':'disabled'}>Sign out</button></div>
+    <p class="small" id="fbMsg" role="status">${esc(S.fbStatus||(Cloud.has()?'Config saved. Tap Sign in with Google.':'No config yet.'))}</p>
+    <details><summary class="small"><b>One-time setup steps (about 10 minutes)</b></summary>
+      <ol class="small">
+        <li>Go to console.firebase.google.com and create a project (any name, turn Google Analytics off).</li>
+        <li><b>Build → Authentication → Get started → Google</b>: enable it, choose your support email, Save.</li>
+        <li>Authentication → <b>Settings → Authorized domains → Add domain</b>: <b>gathini.github.io</b></li>
+        <li><b>Build → Firestore Database → Create database</b>: any location (europe-west or similar), start in <b>production mode</b>.</li>
+        <li>Firestore → <b>Rules</b> tab: replace everything with the rules below, then <b>Publish</b>.</li>
+        <li>Project settings (gear) → <b>Your apps → Web (&lt;/&gt;)</b>: register an app, then copy the <b>firebaseConfig</b> block and paste it above. Save config, then Sign in with Google.</li>
+      </ol>
+      <p class="small">Rules to paste:</p>
+      <pre class="small" style="white-space:pre-wrap;user-select:all;background:#F3F1FF;padding:10px;border-radius:10px">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}</pre></details></div>
   <div class="panel"><h3>Backup and storage</h3>
     <p class="small"><b>${(()=>{const a=backupAge();return !a?'No client folders to back up yet.':a.never?'Not backed up yet.':'Last backup: '+niceDate(S.lastBackup)})()}</b></p>
     <p class="muted small">${Store.ok?'Your folders and photos are saved inside this browser on this phone.':'Saving is off in this window, so work is lost when you close it.'} If you clear your browser data, or lose the phone, they are gone. A backup copy kept in Google Drive protects you.</p>
@@ -595,6 +618,58 @@ function viewSettings(){
     <label class="f">Google client ID<input type="text" id="gClientIn" value="${esc(aiGet('gclient'))}" placeholder="1234…apps.googleusercontent.com" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
     <div class="row"><button class="btn" data-act="g-save">Save ID</button><button class="btn primary" data-act="g-backup" ${aiGet('gclient')&&!S.gBusy?'':'disabled'}>Back up to Google Drive</button><button class="btn" data-act="g-restore" ${aiGet('gclient')&&!S.gBusy?'':'disabled'}>Restore from Drive</button></div>
     <p class="small" id="gMsg" role="status">${esc(S.gStatus||(aiGet('gclient')?'Ready. Back up now will also use Google Drive.':'No client ID yet.'))}</p></div>`}
+
+
+/* ---------- Cloud sync (Firebase Firestore, free plan, images stored in documents) ---------- */
+const FBV='10.12.2';
+function parseFbCfg(t){const o={};String(t||'').replace(/["']?(apiKey|authDomain|projectId|storageBucket|messagingSenderId|appId|measurementId)["']?\s*:\s*["']([^"']+)["']/g,(m,k,v)=>{o[k]=v});return o}
+function loadScript(u){return new Promise((res,rej)=>{if(document.querySelector('script[src="'+u+'"]'))return res();const sc=document.createElement('script');sc.src=u;sc.onload=res;sc.onerror=()=>rej({code:'network'});document.head.appendChild(sc)})}
+async function fitSrc(src,max){max=max||880000;if(src.length<=max)return src;const img=await loadImg(src);let k=1;for(let i=0;i<8;i++){const w=Math.round(img.width*k),h=Math.round(img.height*k);const cv=document.createElement('canvas');cv.width=w;cv.height=h;const x=cv.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(img,0,0,w,h);const o=cv.toDataURL('image/jpeg',.82);if(o.length<=max)return o;k*=.8}return src}
+const Cloud={user:null,db:null,auth:null,ready:false,timers:{},busy:{},first:true,
+  msg(t){S.fbStatus=t;const e=$('#fbMsg');if(e)e.textContent=t},
+  cfg(){return parseFbCfg(aiGet('fbcfg'))},
+  has(){const c=this.cfg();return !!(c.apiKey&&c.projectId&&c.appId)},
+  async init(){if(this.ready||!this.has())return;
+    try{const b='https://www.gstatic.com/firebasejs/'+FBV+'/firebase-';await loadScript(b+'app-compat.js');await loadScript(b+'auth-compat.js');await loadScript(b+'firestore-compat.js');
+      const c=this.cfg();if(!c.authDomain)c.authDomain=c.projectId+'.firebaseapp.com';
+      if(!firebase.apps.length)firebase.initializeApp(c);this.auth=firebase.auth();this.db=firebase.firestore();this.ready=true;
+      this.auth.onAuthStateChanged(u=>{this.user=u||null;if(u){this.msg('Signed in as '+u.email+'. Syncing…');this.listen()}else{this.stop();this.msg('Not signed in.')}if(S.view==='settings')render()})}
+    catch(e){this.msg('Could not load Firebase. Check your connection.')}},
+  async signIn(){await this.init();if(!this.ready){return}try{await this.auth.signInWithPopup(new firebase.auth.GoogleAuthProvider())}catch(e){this.msg(e&&e.code==='auth/unauthorized-domain'?'Firebase does not know this website yet. In Firebase: Authentication → Settings → Authorized domains → add gathini.github.io':e&&e.code==='auth/popup-blocked'?'Your browser blocked the sign-in window. Allow pop-ups for this site and try again.':e&&e.code==='auth/popup-closed-by-user'?'Sign-in was cancelled.':'Sign-in failed: '+((e&&e.message)||e))}},
+  async signOut(){try{await this.auth.signOut()}catch(e){}},
+  uref(){return this.db.collection('users').doc(this.user.uid)},
+  stop(){if(this.unsub){this.unsub();this.unsub=null}if(this.unsubS){this.unsubS();this.unsubS=null}this.first=true},
+  listen(){if(this.unsub)return;const u=this.uref();
+    this.unsub=u.collection('clients').onSnapshot(async snap=>{try{
+      for(const ch of snap.docChanges()){if(ch.doc.metadata.hasPendingWrites)continue;await this.pullOne(ch.doc.id,ch.doc.data())}
+      if(this.first){this.first=false;const remote=new Map();snap.docs.forEach(d=>remote.set(d.id,d.data()));
+        for(const c of S.clients){if(c.example)continue;const r=remote.get(c.id);if(!r||(r.ts||'')<(c.updatedAt||c.createdAt||'')){if(!c.updatedAt)c.updatedAt=c.createdAt||new Date().toISOString();this.queue(c,true)}}this.pushSettings()}
+      this.lastOk=new Date().toISOString();this.msg('Saved to the cloud. Last checked '+niceDate(this.lastOk)+'.');if(S.view==='settings'||S.view==='home')render()}catch(e){this.msg('Sync problem: '+this.err(e))}},e=>this.msg('Sync problem: '+this.err(e)));
+    this.unsubS=u.collection('meta').onSnapshot(async snap=>{for(const ch of snap.docChanges()){if(ch.doc.metadata.hasPendingWrites)continue;const d=ch.doc.data();
+      if(ch.doc.id==='settings'&&d&&d.json&&(d.ts||'')>(S.settings.updatedAt||'')){try{const st=JSON.parse(d.json);const logo=S.settings.logo;S.settings=Object.assign({},DEF,st,{logo:st.hasLogo?logo:null,updatedAt:d.ts});delete S.settings.hasLogo;
+        if(st.hasLogo&&!logo){const l=await u.collection('meta').doc('logo').get();if(l.exists)S.settings.logo=l.data().data}Store.put('meta',{key:'settings',value:S.settings});render()}catch(e){}}}})},
+  err(e){const c=e&&e.code||'';if(/permission/.test(c))return 'Firebase refused. Check the Firestore rules (see the steps below).';if(/unavailable|network/.test(c))return 'offline, will retry.';return (e&&e.message)||String(e)},
+  queue(c,now){if(!this.user||!this.db||c.example)return;clearTimeout(this.timers[c.id]);this.timers[c.id]=setTimeout(()=>this.push(c),now?100:2500)},
+  async push(c){if(!this.user||this.busy[c.id]){if(this.busy[c.id])this.queue(c);return}this.busy[c.id]=1;
+    try{this.msg('Saving to the cloud…');const col=this.uref().collection('clients').doc(c.id);const fp=Object.assign({},c.cloudFp||{});const items=[...c.photos.map(p=>['photo',p]),...c.pages.map(p=>['page',p])];const keep={};
+      for(const [kind,p] of items){const f=p.src.length;keep[p.id]=f;if(fp[p.id]!==f){const data=await fitSrc(p.src);await col.collection('imgs').doc(p.id).set({data,kind});fp[p.id]=f}}
+      for(const id of Object.keys(fp)){if(!(id in keep)){try{await col.collection('imgs').doc(id).delete()}catch(e){}delete fp[id]}}
+      c.cloudFp=fp;const slim=JSON.parse(JSON.stringify(c,(k,v)=>(k==='src'||k==='cloudFp'||k==='drive')?undefined:v));
+      await col.set({json:JSON.stringify(slim),ts:c.updatedAt,deleted:false,fp});Store.put('clients',c);this.lastOk=new Date().toISOString();this.msg('Saved to the cloud '+niceDate(this.lastOk)+'.')}
+    catch(e){this.msg('Cloud save problem: '+this.err(e))}finally{this.busy[c.id]=0}},
+  async pullOne(id,r){const local=getClient(id);
+    if(r.deleted){if(local&&(local.updatedAt||'')<=(r.ts||'~')){Store.del('clients',id);S.clients=S.clients.filter(x=>x.id!==id);if(S.openId===id)S.openId=null;if(S.studioId===id)S.studioId=null;render()}return}
+    if(local&&(local.updatedAt||'')>=(r.ts||''))return;
+    const c=migrate(JSON.parse(r.json));const col=this.uref().collection('clients').doc(id);const have={};if(local){local.photos.concat(local.pages).forEach(p=>{if(p.src)have[p.id]=p})}
+    for(const arr of [c.photos,c.pages]){for(const p of arr){const h=have[p.id];if(h&&r.fp&&local.cloudFp&&local.cloudFp[p.id]===r.fp[p.id]){p.src=h.src}else{const d=await col.collection('imgs').doc(p.id).get();p.src=d.exists?d.data().data:''}}}
+    c.pages=c.pages.filter(p=>p.src);c.photos=c.photos.filter(p=>p.src);c.cloudFp=r.fp||{};c.updatedAt=r.ts;
+    await Store.put('clients',c);const i=S.clients.findIndex(x=>x.id===id);if(i>=0)S.clients[i]=c;else S.clients.unshift(c);S.examples=S.clients.some(x=>x.example);
+    const ae=document.activeElement;if(!(ae&&/INPUT|TEXTAREA|SELECT/.test(ae.tagName)))render();else toast('Updated from your other device. Refresh when you finish typing.')},
+  async remove(c){if(!this.user||!this.db||c.example)return;try{const col=this.uref().collection('clients').doc(c.id);for(const id of Object.keys(c.cloudFp||{})){try{await col.collection('imgs').doc(id).delete()}catch(e){}}await col.set({deleted:true,ts:new Date().toISOString(),json:'',fp:{}})}catch(e){}},
+  queueSettings(){if(!this.user||!this.db)return;clearTimeout(this.timers._s);this.timers._s=setTimeout(()=>this.pushSettings(),2500)},
+  async pushSettings(){if(!this.user)return;try{const u=this.uref();const st=Object.assign({},S.settings);const logo=st.logo;st.hasLogo=!!logo;delete st.logo;if(logo)await u.collection('meta').doc('logo').set({data:await fitSrc(logo)});await u.collection('meta').doc('settings').set({json:JSON.stringify(st),ts:S.settings.updatedAt||new Date().toISOString()})}catch(e){}},
+  async syncAll(){if(!this.user)return;this.first=true;this.stop();this.listen()}};
+window.addEventListener('online',()=>{if(Cloud.user)Cloud.syncAll()});
 
 /* ---------- render ---------- */
 function render(){
@@ -731,7 +806,7 @@ async function exportPdf(c){
   if(btn)btn.disabled=false;setTimeout(()=>{if(prog)prog.hidden=true},800)}
 
 function backupAge(){const real=S.clients.some(c=>!c.example);if(!real)return null;if(!S.lastBackup)return {never:true};const d=Math.floor((Date.now()-new Date(S.lastBackup))/864e5);return {days:d}}
-function backupBanner(){const a=backupAge();if(!a)return '';if(!a.never&&a.days<3)return '';
+function backupBanner(){if(Cloud.user&&Cloud.lastOk)return '';const a=backupAge();if(!a)return '';if(!a.never&&a.days<3)return '';
   return `<div class="note"><b>${a.never?'Your work is not backed up yet.':'Your last backup was '+(a.days===1?'1 day':a.days+' days')+' ago.'}</b> It only lives in this browser, so clearing your browser data would erase it. <div style="margin-top:8px"><button class="btn small primary" data-act="backup">Back up now</button></div></div>`}
 
 /* ---------- Google Drive ---------- */
@@ -859,9 +934,13 @@ document.addEventListener('click',e=>{
   else if(a==='ai-test-key')aiTestKey();
   else if(a==='ai-remove-key'){aiSet('key','');render();toast('Key removed from this device.')}
   else if(a==='export'&&c)exportPdf(c);
-  else if(a==='del-client'&&c)confirmTwice(t,'del'+c.id,'Press again to delete',()=>{Store.del('clients',c.id);S.clients=S.clients.filter(x=>x.id!==c.id);S.openId=null;if(S.studioId===c.id)S.studioId=null;render();toast('Folder deleted.')});
+  else if(a==='del-client'&&c)confirmTwice(t,'del'+c.id,'Press again to delete',()=>{Store.del('clients',c.id);Cloud.remove(c);S.clients=S.clients.filter(x=>x.id!==c.id);S.openId=null;if(S.studioId===c.id)S.studioId=null;render();toast('Folder deleted.')});
   else if(a==='backup')backup();
   else if(a==='backup-dl')backup('download');
+  else if(a==='fb-save'){const v=($('#fbCfgIn').value||'').trim();const o=parseFbCfg(v);if(v&&!(o.apiKey&&o.projectId&&o.appId)){Cloud.msg('That does not look like the Firebase config. It should contain apiKey, projectId and appId.');return}aiSet('fbcfg',v);Cloud.msg(v?'Config saved. Tap Sign in with Google.':'Config removed.');Cloud.init().then(render)}
+  else if(a==='fb-signin'){Cloud.msg('Opening Google sign-in…');Cloud.signIn()}
+  else if(a==='fb-sync'){Cloud.syncAll();Cloud.msg('Syncing…')}
+  else if(a==='fb-signout'){Cloud.signOut()}
   else if(a==='g-save'){const v=($('#gClientIn').value||'').trim();if(v&&!/\.apps\.googleusercontent\.com$/.test(v)){gMsg('That does not look like a client ID. It ends with .apps.googleusercontent.com');return}aiSet('gclient',v);gTok=null;gMsg(v?'Client ID saved.':'Client ID removed.');render();if(v)loadGsi().catch(()=>{})}
   else if(a==='g-backup'){const real=S.clients.filter(x=>!x.example);if(!real.length){toast('There are no client folders to back up yet.');return}driveBackup(real)}
   else if(a==='g-restore')driveRestore();
@@ -932,7 +1011,7 @@ async function start(){
   else S.examples=S.clients.some(c=>c.example);
   if(!Store.ok)toast('Saving is turned off in this window. Your work will not be kept after you close it.');
   if(aiGet('gclient'))loadGsi().catch(()=>{});
-  render()}
+  render();Cloud.init()}
 start();
 })();
 </script>
