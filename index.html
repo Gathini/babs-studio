@@ -670,7 +670,7 @@ async function aiRedraw(photoSrc){
   const img=await loadImg(out);const cv=document.createElement('canvas');cv.width=img.width;cv.height=img.height;const x=cv.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,cv.width,cv.height);x.drawImage(img,0,0);return cv.toDataURL('image/jpeg',.93)}
 function aiErr(e){
   if(e.code==='nokey')return 'Add your OpenAI key in Settings first.';
-  if(e.code==='network')return 'AI redraw does not work from the Claude link. It only works from your own website copy of the studio. Quick outline still works here.';
+  if(e.code==='network')return /claude\.ai|claudeusercontent|usercontent/i.test(location.hostname)?'AI redraw does not work from the Claude link. Open your own website copy of the studio instead.':'Could not reach OpenAI. Check your internet or data connection and try again. If it keeps happening, try Chrome, turn off any data saver or ad blocker, and make sure the page is not in private mode.';
   if(e.status===401)return 'OpenAI did not accept the key. Check it in Settings, or paste a new one.';
   if(e.status===403||e.status===404)return 'OpenAI will not let this account make images with this model yet. It may need credit added, or organisation verification. Try another model in Settings. '+(e.msg||'');
   if(e.status===429)return /quota|billing|credit|limit/i.test(e.msg)?'There is no credit on the OpenAI account. Add credit under Billing, then try again.':'OpenAI is busy. Wait a minute and try again.';
