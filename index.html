@@ -549,7 +549,51 @@ function viewSettings(){
   const s=S.settings;
   return `
   <section class="head"><div><p class="eyebrow">Settings</p><h1>Settings</h1><p>Your details appear on the gift page and back cover of every book.</p></div></section>
-  <div class="panel"><h3>Your brand</h3><div class="fields">
+  <div class="panel" id="syncPanel"><h3>Backup and sync</h3>
+    ${(()=>{const on=!!Cloud.user;const a=backupAge();
+      if(on)return `<div class="note" style="background:#E6F7F0"><b>Cloud sync is on.</b> Signed in as <b>${esc(Cloud.user.email)}</b>. Every change saves automatically, and your folders are available on any device you sign in on.</div>`;
+      if(Cloud.has())return `<div class="note"><b>Cloud sync is set up but you are signed out.</b> Tap Sign in with Google so your work saves automatically.</div>`;
+      return `<div class="note"><b>Not backed up automatically yet.</b> ${!a?'':a.never?'You have never made a backup copy. ':'Last backup copy: '+esc(niceDate(S.lastBackup))+'. '}Set up cloud sync below so your work saves itself and follows you between phone and laptop.</div>`})()}
+    <p class="small" id="fbMsg" role="status">${esc(S.fbStatus||(Cloud.has()?(Cloud.user?'Syncing…':'Config saved. Tap Sign in with Google.'):'No cloud connection yet.'))}</p>
+    <div class="row"><button class="btn primary" data-act="fb-signin" ${Cloud.has()&&!Cloud.user?'':'style="display:none"'}>Sign in with Google</button><button class="btn" data-act="fb-sync" ${Cloud.user?'':'style="display:none"'}>Sync now</button><button class="btn" data-act="fb-signout" ${Cloud.user?'':'style="display:none"'}>Sign out</button></div>
+    <details ${Cloud.has()?'':'open'}><summary class="small"><b>${Cloud.has()?'Connection details':'Set up cloud sync'}</b></summary>
+    <label class="f">Firebase web app config<textarea id="fbCfgIn" rows="6" placeholder="Paste the whole firebaseConfig block here" autocapitalize="off" spellcheck="false">${esc(aiGet('fbcfg'))}</textarea></label>
+    <div class="row"><button class="btn" data-act="fb-save">Save config</button></div>
+    <details style="margin-top:8px"><summary class="small"><b>One-time setup steps (about 10 minutes)</b></summary>
+      <ol class="small">
+        <li>Go to console.firebase.google.com and create a project (any name, turn Google Analytics off).</li>
+        <li><b>Build → Authentication → Get started → Google</b>: enable it, choose your support email, Save.</li>
+        <li>Authentication → <b>Settings → Authorized domains → Add domain</b>: <b>gathini.github.io</b></li>
+        <li><b>Build → Firestore Database → Create database</b>: any location (europe-west or similar), start in <b>production mode</b>.</li>
+        <li>Firestore → <b>Rules</b> tab: replace everything with the rules below, then <b>Publish</b>.</li>
+        <li>Project settings (gear) → <b>Your apps → Web (&lt;/&gt;)</b>: register an app, then copy the <b>firebaseConfig</b> block and paste it above. Save config, then Sign in with Google.</li>
+      </ol>
+      <p class="small">Rules to paste:</p>
+      <pre class="small" style="white-space:pre-wrap;user-select:all;background:#F3F1FF;padding:10px;border-radius:10px">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}</pre></details>
+    </details>
+    <p class="muted small">${S.persisted?'This browser has agreed not to clear the data for this website automatically.':'This browser may clear the data for this website if the phone runs low on space.'} With cloud sync on, that no longer loses your work.</p></div>
+  <div class="panel"><details><summary><b>Extra backup copies (optional)</b></summary>
+    <p class="muted small">Cloud sync already protects your work. Use these if you also want a copy as a file or in Google Drive.</p>
+
+    <p class="small"><b>${(()=>{const a=backupAge();return !a?'No client folders to back up yet.':a.never?'No file backup made yet.':'Last file backup: '+niceDate(S.lastBackup)})()}</b></p>
+    <p class="muted small">${Store.ok?'Your folders and photos are saved inside this browser on this phone.':'Saving is off in this window, so work is lost when you close it.'} If you clear your browser data, or lose the phone, they are gone. A backup copy kept in Google Drive protects you.</p>
+    <p class="muted small">${S.persisted?'This browser has agreed not to clear your data automatically.':'This browser may clear the data automatically if the phone runs low on space.'} That does not protect you if you press "Clear browsing data" yourself.</p>
+    <div class="row"><button class="btn primary" data-act="backup">Back up now</button><button class="btn" data-act="backup-dl">Save as a file</button></div>
+    <p class="muted small"><b>Back up now</b> opens your phone's share menu. Choose <b>Drive</b> (save it in a folder) or <b>Gmail</b> (send it to yourself). Do this after every new book, or weekly.</p>
+    <div class="row"><label class="btn" style="cursor:pointer">Restore from a backup<input type="file" accept=".json,.txt,application/json,text/plain" data-upload="restore" class="ov"></label></div>
+    <p class="muted small">To restore on a new phone or after clearing data: open the studio, then <b>Restore from a backup</b>, and choose the saved file from Drive or your downloads.</p>
+    <h4 style="margin:14px 0 4px">Google Drive</h4>
+    <p class="muted small">${S.gUser?'Signed in as <b>'+esc(S.gUser)+'</b>. ':''}Saves a folder for each client to your Google Drive, with their photos, colouring pages and details. Needs a one-time setup. Paste your Google client ID below. It is safe to share, it is not a password.</p>
+    <label class="f">Google client ID<input type="text" id="gClientIn" value="${esc(aiGet('gclient'))}" placeholder="1234…apps.googleusercontent.com" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+    <div class="row"><button class="btn" data-act="g-save">Save ID</button><button class="btn primary" data-act="g-backup" ${aiGet('gclient')&&!S.gBusy?'':'disabled'}>Back up to Google Drive</button><button class="btn" data-act="g-restore" ${aiGet('gclient')&&!S.gBusy?'':'disabled'}>Restore from Drive</button></div>
+    <p class="small" id="gMsg" role="status">${esc(S.gStatus||(aiGet('gclient')?'Ready. Back up now will also use Google Drive.':'No client ID yet.'))}</p></details></div>  <div class="panel"><h3>Your brand</h3><div class="fields">
     <label class="f">Business name<input type="text" data-s="brand" value="${esc(s.brand)}"></label>
     <label class="f">Email<input type="email" data-s="email" value="${esc(s.email)}" placeholder="you@example.com"></label>
     <label class="f">Phone<input type="tel" data-s="phone" value="${esc(s.phone)}" placeholder="07…"></label></div>
@@ -582,42 +626,7 @@ function viewSettings(){
     <div class="fields"><label class="f">Image model<select id="aiModel">${[['gpt-image-2','gpt-image-2 (recommended)'],['gpt-image-1.5','gpt-image-1.5'],['gpt-image-1-mini','gpt-image-1-mini (cheapest)']].map(([k,l])=>`<option value="${k}" ${aiGet('model','gpt-image-2')===k?'selected':''}>${l}</option>`).join('')}</select></label>
     <label class="f">Quality<select id="aiQuality">${[['low','Low (cheapest)'],['medium','Medium (good for line art)'],['high','High (costs more)']].map(([k,l])=>`<option value="${k}" ${aiGet('quality','medium')===k?'selected':''}>${l}</option>`).join('')}</select></label></div>
     <p class="muted small">Each redraw costs OpenAI credit, a few shillings a page. Needs credit on the OpenAI API account (separate from ChatGPT). If OpenAI retires a model, pick another here.</p></div>
-  <div class="panel"><h3>Cloud sync (your work follows you)</h3>
-    <p class="muted small">Saves everything automatically to your own Firebase cloud, a few seconds after each change. Open the same website on your phone or laptop, sign in with Google, and your folders are there. ${Cloud.user?'<b>Signed in as '+esc(Cloud.user.email)+'.</b>':'Needs a one-time setup. The steps are below.'}</p>
-    <label class="f">Firebase web app config<textarea id="fbCfgIn" rows="6" placeholder="Paste the whole firebaseConfig block here" autocapitalize="off" spellcheck="false">${esc(aiGet('fbcfg'))}</textarea></label>
-    <div class="row"><button class="btn" data-act="fb-save">Save config</button><button class="btn primary" data-act="fb-signin" ${Cloud.has()&&!Cloud.user?'':'disabled'}>Sign in with Google</button><button class="btn" data-act="fb-sync" ${Cloud.user?'':'disabled'}>Sync now</button><button class="btn" data-act="fb-signout" ${Cloud.user?'':'disabled'}>Sign out</button></div>
-    <p class="small" id="fbMsg" role="status">${esc(S.fbStatus||(Cloud.has()?'Config saved. Tap Sign in with Google.':'No config yet.'))}</p>
-    <details><summary class="small"><b>One-time setup steps (about 10 minutes)</b></summary>
-      <ol class="small">
-        <li>Go to console.firebase.google.com and create a project (any name, turn Google Analytics off).</li>
-        <li><b>Build → Authentication → Get started → Google</b>: enable it, choose your support email, Save.</li>
-        <li>Authentication → <b>Settings → Authorized domains → Add domain</b>: <b>gathini.github.io</b></li>
-        <li><b>Build → Firestore Database → Create database</b>: any location (europe-west or similar), start in <b>production mode</b>.</li>
-        <li>Firestore → <b>Rules</b> tab: replace everything with the rules below, then <b>Publish</b>.</li>
-        <li>Project settings (gear) → <b>Your apps → Web (&lt;/&gt;)</b>: register an app, then copy the <b>firebaseConfig</b> block and paste it above. Save config, then Sign in with Google.</li>
-      </ol>
-      <p class="small">Rules to paste:</p>
-      <pre class="small" style="white-space:pre-wrap;user-select:all;background:#F3F1FF;padding:10px;border-radius:10px">rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /users/{uid}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
-    }
-  }
-}</pre></details></div>
-  <div class="panel"><h3>Backup and storage</h3>
-    <p class="small"><b>${(()=>{const a=backupAge();return !a?'No client folders to back up yet.':a.never?'Not backed up yet.':'Last backup: '+niceDate(S.lastBackup)})()}</b></p>
-    <p class="muted small">${Store.ok?'Your folders and photos are saved inside this browser on this phone.':'Saving is off in this window, so work is lost when you close it.'} If you clear your browser data, or lose the phone, they are gone. A backup copy kept in Google Drive protects you.</p>
-    <p class="muted small">${S.persisted?'This browser has agreed not to clear your data automatically.':'This browser may clear the data automatically if the phone runs low on space.'} That does not protect you if you press "Clear browsing data" yourself.</p>
-    <div class="row"><button class="btn primary" data-act="backup">Back up now</button><button class="btn" data-act="backup-dl">Save as a file</button></div>
-    <p class="muted small"><b>Back up now</b> opens your phone's share menu. Choose <b>Drive</b> (save it in a folder) or <b>Gmail</b> (send it to yourself). Do this after every new book, or weekly.</p>
-    <div class="row"><label class="btn" style="cursor:pointer">Restore from a backup<input type="file" accept=".json,.txt,application/json,text/plain" data-upload="restore" class="ov"></label></div>
-    <p class="muted small">To restore on a new phone or after clearing data: open the studio, then <b>Restore from a backup</b>, and choose the saved file from Drive or your downloads.</p></div>
-  <div class="panel"><h3>Google Drive</h3>
-    <p class="muted small">${S.gUser?'Signed in as <b>'+esc(S.gUser)+'</b>. ':''}Saves a folder for each client to your Google Drive, with their photos, colouring pages and details. Needs a one-time setup. Paste your Google client ID below. It is safe to share, it is not a password.</p>
-    <label class="f">Google client ID<input type="text" id="gClientIn" value="${esc(aiGet('gclient'))}" placeholder="1234…apps.googleusercontent.com" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-    <div class="row"><button class="btn" data-act="g-save">Save ID</button><button class="btn primary" data-act="g-backup" ${aiGet('gclient')&&!S.gBusy?'':'disabled'}>Back up to Google Drive</button><button class="btn" data-act="g-restore" ${aiGet('gclient')&&!S.gBusy?'':'disabled'}>Restore from Drive</button></div>
-    <p class="small" id="gMsg" role="status">${esc(S.gStatus||(aiGet('gclient')?'Ready. Back up now will also use Google Drive.':'No client ID yet.'))}</p></div>`}
+`}
 
 
 /* ---------- Cloud sync (Firebase Firestore, free plan, images stored in documents) ---------- */
