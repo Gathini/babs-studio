@@ -353,16 +353,16 @@ async function drawCover(cv,c){
   const title=(c.title||'Your title here').trim();x.fillStyle=fg;x.textAlign='center';x.textBaseline='alphabetic';
   const scale=+c.titleScale||1;let size=(title.length>26?15:title.length>14?19:24)*scale;let lines;const fam='"'+F[0]+'","DM Sans",sans-serif';
   for(;;){x.font=F[2]+' '+(size*u)+'px '+fam;lines=wrap(x,title,W-44*u);if(lines.length<=3||size<8)break;size-=1.5}
-  const lhh=size*u*1.08;const ssz=Math.max(8.5,Math.min(13,size*.5))*(+c.subScale||1);x.font=F[2]+' '+(ssz*u)+'px '+fam;const sl=c.subtitle?wrap(x,c.subtitle,W-40*u).slice(0,2):[];const slh=ssz*u*1.15;
+  const lhh=size*u*1.08;const ssz=Math.max(11,Math.min(20,size*.62))*(+c.subScale||1);x.font=F[2]+' '+(ssz*u)+'px '+fam;const sl=c.subtitle?wrap(x,c.subtitle,W-40*u).slice(0,2):[];const slh=ssz*u*1.15;
   const blockH=size*u*.85+(lines.length-1)*lhh+size*u*.2+(sl.length?ssz*u*1.5+(sl.length-1)*slh+2*u:0);
   const bottom=c.titlePos==='bottom';const blockTop=bottom?H-26*u-blockH:30*u;
   x.font=F[2]+' '+(size*u)+'px '+fam;lines.forEach((l,i)=>x.fillText(l,W/2,blockTop+size*u*.85+i*lhh));
   if(sl.length){const y0=blockTop+size*u*.85+(lines.length-1)*lhh+ssz*u*1.5;x.font=F[2]+' '+(ssz*u)+'px '+fam;x.globalAlpha=.92;sl.forEach((l,i)=>x.fillText(l,W/2,y0+i*slh));x.globalAlpha=1}
   const picTop=bottom?16*u:Math.max(blockTop+blockH+8*u,80*u),picBot=bottom?blockTop-10*u:H-16*u;
   const pg=c.pages.find(p=>p.id===c.coverPageId);
-  if(pg){const top=picTop,bh=picBot-picTop,bw=Math.min(W-26*u,bh*.74);const px=(W-bw)/2;
+  if(pg){const top=picTop,bh=picBot-picTop,bw=Math.min(isDark(col)?W:W-8*u,bh*210/297);const px=(W-bw)/2;
     const ph=await renderPage(pg,Math.round(bw),c.fit,2,c.trim,false);const dh=ph.height*(bw/ph.width),dy=top+(bh-dh)/2;
-    if(isDark(col)){x.fillStyle='#fff';rr(x,px,dy,bw,dh,3*u);x.fill();x.save();rr(x,px,dy,bw,dh,3*u);x.clip();x.drawImage(ph,px,dy,bw,dh);x.restore()}
+    if(isDark(col)){x.fillStyle='#fff';x.fillRect(0,dy,W,dh);x.drawImage(ph,px,dy,bw,dh)}
     else{const t=document.createElement('canvas');t.width=ph.width;t.height=ph.height;const tx=t.getContext('2d');tx.drawImage(ph,0,0);const id=tx.getImageData(0,0,t.width,t.height),d=id.data;for(let i=0;i<d.length;i+=4){for(let k=0;k<3;k++){const v=d[i+k]*255/222;d[i+k]=v>255?255:v}}tx.putImageData(id,0,0);x.save();x.globalCompositeOperation='multiply';x.drawImage(t,px,dy,bw,dh);x.restore()}}
   else{x.globalAlpha=.9;const sx=W/2-27*u,cy=(picTop+picBot)/2;[['#FF5C8A',0],['#FFC93C',1],['#1FB58F',2]].forEach(([k,i])=>{x.fillStyle=k;x.beginPath();x.arc(sx+i*27*u,cy,7*u,0,7);x.fill()});x.globalAlpha=1}}
 async function drawInside(cv,st,c){await fontsReady();const x=cv.getContext('2d'),W=cv.width,H=cv.height,u=W/210;x.fillStyle='#fff';x.fillRect(0,0,W,H);await footerBlock(x,W,H,u,'#1E1B3A',st,c)}
